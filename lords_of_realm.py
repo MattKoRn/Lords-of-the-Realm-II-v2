@@ -1,9 +1,35 @@
 #!/usr/bin/env python3
 """
-Lords of the Realm II - Text Based Game
-Based on the original game mechanics from the manual
-Features: Unlimited progression, world scaling, offline progress, 
-          neural network AI, auto-save, combat, tabs/sub-tabs
+Lords of the Realm II - Text Based Game with Neural Network AI
+Based on the original 1996 game mechanics from the official manual
+
+AUTHENTIC GAME MECHANICS:
+- Labor allocation slider (Agriculture vs Industry)
+- Field management (Cattle, Grain, Empty fields)
+- Rations system with diet slider (Dairy/Beef/Grain)
+- County management with multiple territories
+- Merchant trading system
+- Castle building with customization
+- Seasonal turn-based gameplay
+- Real-time battles with tactical control
+- Diplomacy with AI nobles (Bishop, Baron, Knight, Countess)
+
+NEURAL NETWORK FEATURES:
+- AI learns optimal labor allocation strategies
+- Evolves combat tactics through reinforcement learning
+- Predicts resource needs and enemy behavior
+- Auto-play mode with trainable neural network
+- Network mutation and evolution across games
+
+Controls:
+- Arrow keys: Navigate menus and sliders
+- Enter: Select/confirm
+- Escape: Back/exit panel
+- Space: End turn / Pause battle
+- A: Toggle auto-play (neural network control)
+- S: Save game
+- L: Load game
+- ?: Help
 """
 
 import curses
@@ -170,44 +196,74 @@ class NeuralNetwork:
         self.generation += 1
     
     def get_state_vector(self, game: 'Game') -> np.ndarray:
-        """Convert game state to input vector for neural network"""
+        """Convert game state to input vector for neural network.
+        Uses authentic LOTR2 mechanics: labor allocation, fields, rations, etc."""
         state = []
         
-        # Resource ratios (normalized)
+        # Resource ratios (normalized) - now includes wood and weapons
         total_resources = sum([
             game.resources.get('food', 1),
             game.resources.get('gold', 1),
             game.resources.get('stone', 1),
-            game.resources.get('iron', 1)
+            game.resources.get('iron', 1),
+            game.resources.get('wood', 1),
+            game.resources.get('weapons', 1)
         ])
         
         state.append(game.resources.get('food', 0) / max(total_resources, 1))
         state.append(game.resources.get('gold', 0) / max(total_resources, 1))
         state.append(game.resources.get('stone', 0) / max(total_resources, 1))
         state.append(game.resources.get('iron', 0) / max(total_resources, 1))
+        state.append(game.resources.get('wood', 0) / max(total_resources, 1))
+        state.append(game.resources.get('weapons', 0) / max(total_resources, 1))
         
         # Population metrics
         state.append(min(game.population / max(game.max_population, 1), 1.0))
         state.append(game.happiness / 100.0)
         
+        # Labor allocation (core LOTR2 mechanic)
+        state.append(game.labor_agriculture / 100.0)
+        state.append(game.labor_industry / 100.0)
+        
+        # Field assignments
+        state.append(game.fields.get('cattle', 0) / max(game.total_fields, 1))
+        state.append(game.fields.get('grain', 0) / max(game.total_fields, 1))
+        state.append(game.fields.get('empty', 0) / max(game.total_fields, 1))
+        
+        # Rations system
+        ration_values = {'none': 0, 'quarter': 0.2, 'half': 0.4, 'normal': 0.6, 'double': 0.8, 'triple': 1.0}
+        state.append(ration_values.get(game.ration_level, 0.5))
+        state.append(game.diet_slider / 100.0)
+        
+        # Health rating
+        health_values = {'perfect': 1.0, 'good': 0.8, 'average': 0.6, 'sick': 0.3, 'diseased': 0.1}
+        state.append(health_values.get(game.health_rating, 0.5))
+        
+        # Industry status
+        active_count = sum(1 for ind in game.industries.values() if ind['active'])
+        state.append(active_count / len(game.industries))
+        
         # Military strength
         total_units = sum(game.army.values())
-        state.append(min(total_units / max(game.max_army_size, 1), 1.0))
+        max_army = 1000  # Default max army size
+        state.append(min(total_units / max(max_army, 1), 1.0))
         
-        # Territory
-        state.append(min(game.territory / max(game.max_territory, 1), 1.0))
+        # Diplomacy relations (average with AI nobles)
+        avg_relation = sum(n['relation'] for n in game.ai_nobles.values()) / len(game.ai_nobles)
+        state.append(avg_relation / 100.0)
         
-        # Building levels (normalized)
-        for building in ['farm', 'mine', 'barracks', 'castle', 'market']:
-            level = game.buildings.get(building, {}).get('level', 0)
-            state.append(min(level / 100, 1.0))
+        # Treasury/tax rate
+        tax_values = {'none': 0, 'low': 0.25, 'normal': 0.5, 'high': 0.75, 'excessive': 1.0}
+        state.append(tax_values.get(game.tax_rate, 0.5))
+        state.append(min(game.treasury / 1000, 1.0))
         
-        # Combat situation
+        # Season (one-hot encoded as value)
+        season_values = {'spring': 0.25, 'summer': 0.5, 'autumn': 0.75, 'winter': 1.0}
+        state.append(season_values.get(game.season, 0.5))
+        
+        # Combat/siege state
         state.append(1.0 if game.in_combat else 0.0)
-        state.append(game.enemy_strength / max(game.player_strength, 1) if game.player_strength > 0 else 0.0)
-        
-        # Time-based
-        state.append((time.time() - game.start_time) % 3600 / 3600)
+        state.append(1.0 if game.in_siege else 0.0)
         
         # Pad or truncate to input_size
         while len(state) < self.input_size:
@@ -217,11 +273,22 @@ class NeuralNetwork:
         return np.array(state)
     
     def decide_action(self, game: 'Game') -> int:
-        """Decide next action based on game state"""
+        """Decide next action based on game state.
+        Actions correspond to authentic LOTR2 mechanics."""
         state = self.get_state_vector(game)
         output = self.forward(state)
         
-        # Actions: 0-3: Gather resources, 4: Train troops, 5: Build, 6: Attack, 7: Defend, 8: Trade, 9: Explore
+        # Actions for LOTR2:
+        # 0: Increase agriculture labor
+        # 1: Decrease agriculture labor (increase industry)
+        # 2: Activate an industry
+        # 3: Deactivate an industry
+        # 4: Adjust rations
+        # 5: Adjust diet slider
+        # 6: Train troops (conscript)
+        # 7: Trade with merchant
+        # 8: End turn
+        # 9: Diplomacy action
         return int(np.argmax(output))
     
     def save(self, filepath: str):
@@ -264,70 +331,145 @@ class NeuralNetwork:
 
 
 class Game:
-    """Main game class implementing Lords of the Realm II mechanics"""
+    """Main game class implementing authentic Lords of the Realm II mechanics
+    with Neural Network AI for intelligent automation and learning."""
     
     def __init__(self):
-        # Resources
+        # === AUTHENTIC LOTR2 MECHANICS ===
+        
+        # Labor allocation (0-100%, Agriculture vs Industry) - Core mechanic from manual
+        self.labor_agriculture = 80  # % of workforce in agriculture
+        self.labor_industry = 20     # % of workforce in industry
+        
+        # Field management system (each county has fields)
+        self.fields = {
+            'cattle': 3,   # Fields assigned to cattle farming
+            'grain': 0,    # Fields assigned to grain farming  
+            'empty': 2     # Unassigned fields
+        }
+        self.total_fields = 5
+        
+        # Rations system with diet slider (manual page 31-33)
+        self.ration_level = 'normal'  # none, quarter, half, normal, double, triple
+        self.diet_slider = 100  # 0=all grain, 100=all beef (dairy is automatic)
+        self.dairy_produce = 50  # Automatic dairy production from cows
+        self.beef_available = 20  # Cows available for slaughter
+        self.grain_stored = 0     # Grain sacks stored
+        
+        # Resources (food represents combined food types)
         self.resources = {
-            'food': 1000.0,
+            'food': 1000.0,   # Combined food (dairy/beef/grain)
             'gold': 500.0,
             'stone': 200.0,
-            'iron': 100.0
+            'iron': 100.0,
+            'wood': 200.0,    # Added wood for castle building
+            'weapons': 50     # Weapons for arming troops
         }
         
-        # Resource production rates (per second)
-        self.production_rates = {
-            'food': 10.0,
-            'gold': 5.0,
-            'stone': 2.0,
-            'iron': 1.0
-        }
+        # Health system (manual page 26)
+        self.health_rating = 'good'  # perfect, good, average, sick, diseased
         
-        # Population
+        # Population with serfs/peasants terminology from original
         self.population = 100
         self.max_population = 500
         self.happiness = 75.0
         
-        # Buildings
-        self.buildings = {
-            'farm': {'level': 1, 'max_level': 999999},
-            'mine': {'level': 1, 'max_level': 999999},
-            'quarry': {'level': 1, 'max_level': 999999},
-            'iron_works': {'level': 1, 'max_level': 999999},
-            'barracks': {'level': 1, 'max_level': 999999},
-            'castle': {'level': 1, 'max_level': 999999},
-            'market': {'level': 1, 'max_level': 999999},
-            'academy': {'level': 1, 'max_level': 999999}
+        # County/Territory management (multiple counties like original)
+        self.counties = {
+            'home_county': {
+                'name': 'Home County',
+                'population': 100,
+                'happiness': 75,
+                'health': 'good',
+                'fields': {'cattle': 3, 'grain': 0, 'empty': 2},
+                'industries': {
+                    'lumber_mill': False,
+                    'quarry': False, 
+                    'iron_mine': False,
+                    'blacksmith': False
+                },
+                'castle': None,
+                'garrison': 0
+            }
+        }
+        self.selected_county = 'home_county'
+        
+        # Industry buildings (toggle on/off like original - manual page 46-49)
+        self.industries = {
+            'lumber_mill': {'active': False, 'output': 5.0},
+            'quarry': {'active': False, 'output': 2.0},
+            'iron_mine': {'active': False, 'output': 1.0},
+            'blacksmith': {'active': False, 'output': 0.5}
         }
         
-        # Army composition
+        # Castle building system (manual page 50-54)
+        self.castle = {
+            'under_construction': False,
+            'design': 'small',  # small, medium, large, fortress
+            'progress': 0,      # 0-100%
+            'materials_needed': {'wood': 100, 'stone': 100},
+            'workers_assigned': 0,
+            'fortification': 0,
+            'has_moat': False,
+            'tower_count': 0
+        }
+        
+        # Army composition with authentic troop types (manual page 70)
         self.army = {
-            'peasants': 50,
-            'archers': 0,
-            'swordsmen': 0,
-            'knights': 0,
-            'catapults': 0
+            'peasants': 50,     # Unarmed farmers (weak but numerous)
+            'archers': 0,       # Ranged units
+            'swordsmen': 0,     # Basic infantry
+            'knights': 0,       # Elite cavalry
+            'catapults': 0      # Siege weapons
         }
+        self.army_location = 'home'  # Location of army on map
+        self.army_wages = 0      # Weekly wages for professional troops
         
-        self.max_army_size = 1000
+        # Mercenary system (manual page 68)
+        self.mercenaries_available = []
+        self.mercenary_hired = []
         
-        # Territory
-        self.territory = 1
-        self.max_territory = 10000
-        
-        # Combat
+        # Combat state
         self.in_combat = False
+        self.in_siege = False
         self.enemy_strength = 0
         self.player_strength = 0
         self.combat_log = []
+        self.battle_paused = False
         
-        # Province management (like original game)
-        self.provinces = {
-            'home': {'owner': 'player', 'type': 'castle', 'fortification': 1},
+        # Diplomacy - AI nobles from original game (manual page 97)
+        self.ai_nobles = {
+            'bishop': {'name': 'The Bishop', 'color': 'purple', 'relation': 50, 'alive': True},
+            'baron': {'name': 'The Baron', 'color': 'red', 'relation': 50, 'alive': True},
+            'knight': {'name': 'The Knight', 'color': 'blue', 'relation': 50, 'alive': True},
+            'countess': {'name': 'The Countess', 'color': 'green', 'relation': 50, 'alive': True}
         }
-        self.total_provinces = 1
+        self.alliances = []
+        self.enemies = []
+        self.messages_received = []
         
-        # Research/Technology
+        # Merchant trading system (manual page 57)
+        self.merchant_present = False
+        self.merchant_inventory = {
+            'cattle': {'price': 50, 'stock': 10},
+            'grain': {'price': 30, 'stock': 20},
+            'weapons': {'price': 80, 'stock': 15},
+            'ale': {'price': 100, 'stock': 5}  # Ale boosts happiness
+        }
+        
+        # Tax system (manual page 59)
+        self.tax_rate = 'normal'  # none, low, normal, high, excessive
+        self.treasury = 500.0
+        
+        # Conscription level (affects happiness - manual page 27)
+        self.conscription_rate = 0  # % of population drafted
+        
+        # Season/Year tracking (turn-based by season)
+        self.season = 'spring'  # spring, summer, autumn, winter
+        self.year = 1268  # Starting year from original game
+        self.turn_number = 1
+        
+        # Research/Technology (academy based)
         self.technologies = {
             'farming': 1,
             'mining': 1,
@@ -336,6 +478,12 @@ class Game:
             'trade': 1
         }
         
+        # === NEURAL NETWORK AI SYSTEM ===
+        self.neural_network = NeuralNetwork()
+        self.auto_play = False
+        self.nn_actions_taken = 0
+        self.nn_learning_enabled = True
+        
         # Time tracking
         self.start_time = time.time()
         self.last_save_time = time.time()
@@ -343,28 +491,23 @@ class Game:
         self.offline_start = None
         self.offline_end = None
         
-        # Neural Network AI
-        self.neural_network = NeuralNetwork()
-        self.auto_play = False
-        self.nn_actions_taken = 0
-        
-        # Tabs navigation
+        # UI navigation
         self.current_tab = 0
         self.current_sub_tab = 0
         self.tabs = [
-            {'name': 'Overview', 'sub_tabs': ['Status', 'Resources', 'Population']},
-            {'name': 'Province', 'sub_tabs': ['Buildings', 'Upgrades', 'Management']},
-            {'name': 'Military', 'sub_tabs': ['Army', 'Training', 'Combat']},
-            {'name': 'Research', 'sub_tabs': ['Technologies', 'Progress']},
-            {'name': 'Diplomacy', 'sub_tabs': ['Provinces', 'Trade', 'Alliances']},
-            {'name': 'AI Control', 'sub_tabs': ['Neural Net', 'Stats', 'Settings']}
+            {'name': 'County', 'sub_tabs': ['Overview', 'Labor', 'Fields', 'Rations']},
+            {'name': 'Industry', 'sub_tabs': ['Buildings', 'Castle', 'Garrison']},
+            {'name': 'Military', 'sub_tabs': ['Army', 'Training', 'Battles']},
+            {'name': 'Economy', 'sub_tabs': ['Treasury', 'Merchant', 'Trade']},
+            {'name': 'Diplomacy', 'sub_tabs': ['Nobles', 'Alliances', 'Messages']},
+            {'name': 'AI Neural Net', 'sub_tabs': ['Control', 'Learning', 'Stats']}
         ]
         
         # Messages and notifications
         self.messages = []
         self.offline_popup = None
         
-        # Scaling factors (increase as game progresses)
+        # Scaling factors
         self.world_scale = 1.0
         self.difficulty_multiplier = 1.0
         
@@ -372,80 +515,183 @@ class Game:
         self.load_game()
     
     def calculate_production(self) -> Dict[str, float]:
-        """Calculate resource production based on buildings and technologies"""
+        """Calculate resource production based on authentic LOTR2 mechanics:
+        - Labor allocation between Agriculture and Industry
+        - Field assignments (cattle/grain)
+        - Industry buildings (lumber/quarry/iron/blacksmith)
+        - Ration levels affecting worker efficiency
+        """
+        # Base production rates per worker
         base_rates = {
-            'food': 10.0,
-            'gold': 5.0,
-            'stone': 2.0,
-            'iron': 1.0
+            'food': 0.5,      # From agriculture (cattle + grain)
+            'gold': 0.3,      # From mining/taxes
+            'stone': 0.2,     # From quarry
+            'iron': 0.1,      # From iron mines
+            'wood': 0.5,      # From lumber mills
+            'weapons': 0.05   # From blacksmiths
         }
         
-        building_multipliers = {
-            'farm': 'food',
-            'mine': 'gold',
-            'quarry': 'stone',
-            'iron_works': 'iron'
-        }
+        # Calculate effective workforce
+        total_workers = self.population * 0.7  # 70% of pop are workers
         
-        rates = base_rates.copy()
+        # Agriculture production (based on labor allocation and fields)
+        agri_workers = total_workers * (self.labor_agriculture / 100)
         
-        for building, resource in building_multipliers.items():
-            level = self.buildings.get(building, {}).get('level', 1)
-            rates[resource] *= (1 + level * 0.5)
+        # Cattle production (automatic from cattle fields)
+        cattle_fields = self.fields.get('cattle', 0)
+        cattle_factor = max(1, cattle_fields / self.total_fields)
+        dairy_production = cattle_fields * 10 * cattle_factor
+        beef_production = self.beef_available * 2 if self.diet_slider >= 50 else 0
+        
+        # Grain production (from grain fields)
+        grain_fields = self.fields.get('grain', 0)
+        grain_production = grain_fields * 15 * (agri_workers / max(total_workers, 1))
+        
+        # Total food = dairy + beef + grain
+        food_rate = dairy_production + beef_production + grain_production
+        
+        # Industry production (based on labor allocation and active industries)
+        industry_workers = total_workers * (self.labor_industry / 100)
+        active_industries = sum(1 for ind in self.industries.values() if ind['active'])
+        
+        if active_industries > 0:
+            workers_per_industry = industry_workers / active_industries
+            
+            wood_rate = self.industries['lumber_mill']['output'] * workers_per_industry if self.industries['lumber_mill']['active'] else 0
+            stone_rate = self.industries['quarry']['output'] * workers_per_industry if self.industries['quarry']['active'] else 0
+            iron_rate = self.industries['iron_mine']['output'] * workers_per_industry if self.industries['iron_mine']['active'] else 0
+            weapon_rate = self.industries['blacksmith']['output'] * workers_per_industry if self.industries['blacksmith']['active'] else 0
+        else:
+            wood_rate = stone_rate = iron_rate = weapon_rate = 0
         
         # Technology bonuses
-        rates['food'] *= (1 + self.technologies['farming'] * 0.2)
-        rates['gold'] *= (1 + self.technologies['mining'] * 0.2)
-        rates['stone'] *= (1 + self.technologies['construction'] * 0.2)
-        rates['iron'] *= (1 + self.technologies['warfare'] * 0.2)
+        food_rate *= (1 + self.technologies['farming'] * 0.1)
+        wood_rate *= (1 + self.technologies['construction'] * 0.1)
+        stone_rate *= (1 + self.technologies['construction'] * 0.1)
+        iron_rate *= (1 + self.technologies['mining'] * 0.1)
+        weapon_rate *= (1 + self.technologies['warfare'] * 0.1)
         
-        # Population effect
-        pop_factor = self.population / max(self.max_population, 1)
-        for resource in rates:
-            rates[resource] *= pop_factor
+        # Health/rations effect on productivity
+        health_multipliers = {'perfect': 1.2, 'good': 1.0, 'average': 0.8, 'sick': 0.5, 'diseased': 0.2}
+        health_mult = health_multipliers.get(self.health_rating, 1.0)
+        
+        # Happiness effect
+        happiness_mult = 0.5 + (self.happiness / 100) * 0.5
+        
+        # Apply multipliers
+        food_rate *= health_mult * happiness_mult
+        wood_rate *= health_mult * happiness_mult
+        stone_rate *= health_mult * happiness_mult
+        iron_rate *= health_mult * happiness_mult
+        weapon_rate *= health_mult * happiness_mult
+        
+        # Gold from taxes (based on tax rate and population)
+        tax_rates = {'none': 0, 'low': 0.1, 'normal': 0.2, 'high': 0.4, 'excessive': 0.6}
+        gold_rate = self.population * tax_rates.get(self.tax_rate, 0.2) * 0.1
         
         # World scaling
-        for resource in rates:
-            rates[resource] *= self.world_scale
+        scale = self.world_scale
         
-        return rates
+        return {
+            'food': food_rate * scale,
+            'gold': gold_rate * scale,
+            'stone': stone_rate * scale,
+            'iron': iron_rate * scale,
+            'wood': wood_rate * scale,
+            'weapons': weapon_rate * scale
+        }
     
     def update(self, delta_time: float):
-        """Update game state"""
+        """Update game state with authentic LOTR2 seasonal mechanics"""
         if self.in_combat:
             return
         
         # Resource production
         rates = self.calculate_production()
         for resource, rate in rates.items():
-            self.resources[resource] += rate * delta_time
+            if resource in self.resources:
+                self.resources[resource] += rate * delta_time
         
-        # Population growth
-        if self.population < self.max_population and self.resources['food'] > 100:
-            growth_rate = 0.1 * (self.happiness / 100)
-            self.population += growth_rate * delta_time
+        # Food consumption based on rations (manual page 31-33)
+        ration_consumption = {
+            'none': 0,
+            'quarter': 0.25,
+            'half': 0.5,
+            'normal': 1.0,
+            'double': 2.0,
+            'triple': 3.0
+        }
+        consumption_rate = ration_consumption.get(self.ration_level, 1.0)
+        food_needed = self.population * 0.1 * consumption_rate
+        
+        # Dairy is automatic and cannot be stored
+        dairy_fed = min(self.dairy_produce, self.population)
+        remaining_pop = max(0, self.population - dairy_fed)
+        
+        # Rest comes from stored food (beef/grain based on diet slider)
+        if remaining_pop > 0:
+            self.resources['food'] -= remaining_pop * 0.1 * consumption_rate * delta_time
+        
+        # Health effects from rations
+        achieved_ration = self.ration_level
+        if self.resources['food'] < food_needed * 0.25:
+            achieved_ration = 'none'
+        elif self.resources['food'] < food_needed * 0.5:
+            achieved_ration = 'quarter'
+        elif self.resources['food'] < food_needed:
+            achieved_ration = 'half'
+        
+        # Update health based on rations
+        if achieved_ration in ['normal', 'double', 'triple']:
+            if self.health_rating in ['sick', 'diseased']:
+                self.health_rating = 'average'
+            elif self.health_rating == 'average':
+                self.health_rating = 'good'
+        elif achieved_ration in ['none', 'quarter']:
+            if self.health_rating == 'good':
+                self.health_rating = 'average'
+            elif self.health_rating == 'average':
+                self.health_rating = 'sick'
+        
+        # Population growth (immigration + births when happy)
+        if self.happiness > 60 and self.resources['food'] > food_needed:
+            growth_rate = 0.05 * (self.happiness / 100)
+            immigration = 0.02 * (self.happiness / 50)
+            self.population += (growth_rate + immigration) * delta_time
             self.population = min(self.population, self.max_population)
-            
-            # Food consumption
-            food_consumption = self.population * 0.1
-            self.resources['food'] -= food_consumption * delta_time
+        elif self.happiness < 30:
+            # Emigration when unhappy
+            self.population -= 0.03 * delta_time
         
-        # Happiness decay/growth
-        if self.resources['food'] > self.population * 10:
-            self.happiness = min(100, self.happiness + 0.01 * delta_time)
-        else:
-            self.happiness = max(0, self.happiness - 0.05 * delta_time)
+        # Happiness changes
+        # Rations effect
+        ration_happiness = {'none': -0.1, 'quarter': -0.05, 'half': -0.02, 'normal': 0, 'double': 0.02, 'triple': 0.05}
+        self.happiness += ration_happiness.get(self.ration_level, 0) * delta_time
         
-        # Update production rates display
-        self.production_rates = rates
+        # Tax effect
+        tax_happiness = {'none': 0.05, 'low': 0.02, 'normal': 0, 'high': -0.03, 'excessive': -0.1}
+        self.happiness += tax_happiness.get(self.tax_rate, 0) * delta_time
         
-        # World scaling progression
-        total_resources = sum(self.resources.values())
-        if total_resources > 1000000 * (self.world_scale ** 2):
-            self.world_scale *= 1.1
-            self.difficulty_multiplier *= 1.05
-            self.messages.append(f"World difficulty increased! Scale: {self.world_scale:.2f}")
+        # Conscription effect
+        if self.conscription_rate > 20:
+            self.happiness -= 0.05 * delta_time
         
+        # Clamp happiness
+        self.happiness = max(0, min(100, self.happiness))
+        
+        # Season progression (each turn = 1 season)
+        # Seasons affect production slightly
+        season_multipliers = {'spring': 1.0, 'summer': 1.1, 'autumn': 0.9, 'winter': 0.7}
+        
+        # Neural network auto-play
+        if self.auto_play and self.nn_learning_enabled:
+            self.run_neural_network_ai(delta_time)
+        
+        # Auto-save neural network periodically
+        current_time = time.time()
+        if current_time - self.last_nn_save_time >= 10.0:
+            self.save_neural_network()
+            self.last_nn_save_time = current_time
         # Auto-save every second
         current_time = time.time()
         if current_time - self.last_save_time >= 1.0:
@@ -782,6 +1028,107 @@ class Game:
                 
         except Exception as e:
             pass  # Start fresh on error
+    
+    def run_neural_network_ai(self, delta_time: float):
+        """Run neural network AI to automate game decisions.
+        The NN learns optimal strategies through reinforcement learning."""
+        
+        # Get current game state as input vector
+        state = self.neural_network.get_state_vector(self)
+        
+        # Get AI decision from neural network
+        action = self.neural_network.decide_action(self)
+        
+        # Execute action based on NN output
+        reward = 0.0
+        
+        # Actions: 0-3: Adjust labor, 4: Toggle industry, 5: Change rations, 
+        #          6: Train troops, 7: Trade, 8: End turn, 9: Explore/Attack
+        
+        if action == 0:  # Increase agriculture labor
+            old_labor = self.labor_agriculture
+            self.labor_agriculture = min(100, self.labor_agriculture + 5)
+            self.labor_industry = 100 - self.labor_agriculture
+            reward += 0.1 if self.resources['food'] < 500 else -0.1
+            
+        elif action == 1:  # Decrease agriculture labor (increase industry)
+            old_labor = self.labor_agriculture
+            self.labor_agriculture = max(0, self.labor_agriculture - 5)
+            self.labor_industry = 100 - self.labor_agriculture
+            reward += 0.1 if (self.industries['lumber_mill']['active'] or 
+                             self.industries['quarry']['active']) else -0.1
+            
+        elif action == 2:  # Activate an industry
+            inactive = [k for k, v in self.industries.items() if not v['active']]
+            if inactive:
+                chosen = random.choice(inactive)
+                self.industries[chosen]['active'] = True
+                reward += 0.2
+                
+        elif action == 3:  # Deactivate an industry (save workers)
+            active = [k for k, v in self.industries.items() if v['active']]
+            if len(active) > 1:
+                chosen = random.choice(active)
+                self.industries[chosen]['active'] = False
+                reward += 0.1
+                
+        elif action == 4:  # Adjust rations based on food supply
+            if self.resources['food'] > self.population * 2:
+                ration_order = ['none', 'quarter', 'half', 'normal', 'double', 'triple']
+                idx = ration_order.index(self.ration_level)
+                if idx < len(ration_order) - 1:
+                    self.ration_level = ration_order[idx + 1]
+                    reward += 0.1
+            elif self.resources['food'] < self.population * 0.5:
+                ration_order = ['none', 'quarter', 'half', 'normal', 'double', 'triple']
+                idx = ration_order.index(self.ration_level)
+                if idx > 0:
+                    self.ration_level = ration_order[idx - 1]
+                    reward += 0.1
+                    
+        elif action == 5:  # Adjust diet slider
+            if self.beef_available > 10:
+                self.diet_slider = min(100, self.diet_slider + 10)
+            else:
+                self.diet_slider = max(0, self.diet_slider - 10)
+            reward += 0.05
+            
+        elif action == 6:  # Train troops (conscript peasants)
+            if self.population > 50 and self.conscription_rate < 30:
+                self.conscription_rate = min(50, self.conscription_rate + 5)
+                self.army['peasants'] += int(self.population * 0.05)
+                reward += 0.15
+                
+        elif action == 7:  # Trade with merchant (if available)
+            if self.merchant_present:
+                # Buy food if low, sell weapons if high
+                if self.resources['food'] < 200 and self.treasury > 100:
+                    self.resources['food'] += 50
+                    self.treasury -= 50
+                    reward += 0.2
+                elif self.resources.get('weapons', 0) > 100:
+                    self.resources['weapons'] -= 10
+                    self.treasury += 80
+                    reward += 0.15
+                    
+        elif action == 8:  # End turn (advance season)
+            self.end_turn()
+            reward += 0.1
+            
+        elif action == 9:  # Explore/Attack (diplomacy action)
+            # Random diplomatic action
+            noble = random.choice(list(self.ai_nobles.keys()))
+            if self.ai_nobles[noble]['alive']:
+                self.ai_nobles[noble]['relation'] += random.randint(-10, 10)
+                reward += 0.05
+        
+        # Train neural network with this experience
+        target = np.zeros(self.neural_network.output_size)
+        target[action] = 1.0
+        self.neural_network.train(state, target, reward)
+        
+        self.nn_actions_taken += 1
+        self.neural_network.total_resources_gathered += sum(self.resources.values()) * 0.001
     
     def save_neural_network(self):
         """Save neural network silently"""
