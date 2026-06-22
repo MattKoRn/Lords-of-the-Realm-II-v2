@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-from manual_simulation import main
+import manual_simulation
+import simulation_fixes
+
+simulation_fixes.apply()
 
 if __name__ == "__main__":
-    main()
+    manual_simulation.main()
