@@ -394,6 +394,12 @@ class Game:
         }
         self.selected_county = 'home_county'
         
+        # Territory system (expanding realm)
+        self.territory = 1
+        self.max_territory = 10
+        self.provinces = []
+        self.total_provinces = 1
+        
         # Industry buildings (toggle on/off like original - manual page 46-49)
         self.industries = {
             'lumber_mill': {'active': False, 'output': 5.0},
