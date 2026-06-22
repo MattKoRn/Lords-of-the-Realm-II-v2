@@ -1,0 +1,82 @@
+{
+  "resources": {
+    "food": 1000.0,
+    "gold": 9999,
+    "stone": 200.0,
+    "iron": 100.0
+  },
+  "production_rates": {
+    "food": 10.0,
+    "gold": 5.0,
+    "stone": 2.0,
+    "iron": 1.0
+  },
+  "population": 100,
+  "max_population": 500,
+  "happiness": 75.0,
+  "buildings": {
+    "farm": {
+      "level": 1,
+      "max_level": 999999
+    },
+    "mine": {
+      "level": 1,
+      "max_level": 999999
+    },
+    "quarry": {
+      "level": 1,
+      "max_level": 999999
+    },
+    "iron_works": {
+      "level": 1,
+      "max_level": 999999
+    },
+    "barracks": {
+      "level": 1,
+      "max_level": 999999
+    },
+    "castle": {
+      "level": 5,
+      "max_level": 999999
+    },
+    "market": {
+      "level": 1,
+      "max_level": 999999
+    },
+    "academy": {
+      "level": 1,
+      "max_level": 999999
+    }
+  },
+  "army": {
+    "peasants": 50,
+    "archers": 0,
+    "swordsmen": 0,
+    "knights": 0,
+    "catapults": 0
+  },
+  "max_army_size": 1000,
+  "territory": 1,
+  "max_territory": 10000,
+  "provinces": {
+    "home": {
+      "owner": "player",
+      "type": "castle",
+      "fortification": 1
+    }
+  },
+  "total_provinces": 1,
+  "technologies": {
+    "farming": 1,
+    "mining": 1,
+    "warfare": 1,
+    "construction": 1,
+    "trade": 1
+  },
+  "world_scale": 1.0,
+  "difficulty_multiplier": 1.0,
+  "start_time": 1782100586.1189997,
+  "last_save_time": 1782100586.1381974,
+  "offline_start": null,
+  "messages": []
+}
