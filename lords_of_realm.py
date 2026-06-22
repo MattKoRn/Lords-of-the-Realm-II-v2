@@ -428,6 +428,7 @@ class Game:
             'knights': 0,       # Elite cavalry
             'catapults': 0      # Siege weapons
         }
+        self.max_army_size = 100  # Base max army size, increased by barracks
         self.army_location = 'home'  # Location of army on map
         self.army_wages = 0      # Weekly wages for professional troops
         
