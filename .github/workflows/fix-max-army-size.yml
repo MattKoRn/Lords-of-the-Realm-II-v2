@@ -70,3 +70,5 @@ jobs:
             git commit -m "Fix missing Game max_army_size initialization"
             git push
           fi
+
+# Triggered after workflow installation.
