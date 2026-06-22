@@ -1,0 +1,72 @@
+name: Fix missing max_army_size
+
+on:
+  push:
+    paths:
+      - '.github/workflows/fix-max-army-size.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Patch Game army capacity initialization
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("lords_of_realm.py")
+          text = path.read_text(encoding="utf-8")
+
+          army_anchor = """        self.army_location = 'home'  # Location of army on map
+"""
+          army_replacement = """        self.max_army_size = 1000  # Base capacity; barracks upgrades increase this
+        self.army_location = 'home'  # Location of army on map
+"""
+
+          if "self.max_army_size = 1000  # Base capacity" not in text:
+              if army_anchor not in text:
+                  raise SystemExit("Army initialization anchor not found")
+              text = text.replace(army_anchor, army_replacement, 1)
+
+          load_anchor = """        # Load existing save
+        self.load_game()
+"""
+          load_replacement = """        # Load existing save
+        self.load_game()
+
+        # Backwards compatibility for saves created before max_army_size existed.
+        if not hasattr(self, 'max_army_size'):
+            barracks_level = self.buildings.get('barracks', {}).get('level', 0)
+            self.max_army_size = int(1000 * (1.3 ** barracks_level))
+"""
+
+          if "Backwards compatibility for saves created before max_army_size existed" not in text:
+              if load_anchor not in text:
+                  raise SystemExit("Save-loading anchor not found")
+              text = text.replace(load_anchor, load_replacement, 1)
+
+          path.write_text(text, encoding="utf-8")
+
+      - name: Verify syntax and fix
+        run: |
+          python -m py_compile lords_of_realm.py
+          grep -q "self.max_army_size = 1000" lords_of_realm.py
+          grep -q "Backwards compatibility for saves created before max_army_size existed" lords_of_realm.py
+
+      - name: Commit patched source
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add lords_of_realm.py
+          if git diff --cached --quiet; then
+            echo "Source is already fixed."
+          else
+            git commit -m "Fix missing Game max_army_size initialization"
+            git push
+          fi
