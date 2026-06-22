@@ -121,6 +121,7 @@ class NeuralNetwork:
         self.games_played = 0
         self.wins = 0
         self.total_resources_gathered = 0
+        self.nn_actions_taken = 0
         
         # Learning rate
         self.learning_rate = 0.01
@@ -303,6 +304,7 @@ class NeuralNetwork:
             'games_played': self.games_played,
             'wins': self.wins,
             'total_resources_gathered': self.total_resources_gathered,
+            'nn_actions_taken': self.nn_actions_taken,
             'input_size': self.input_size,
             'hidden_size': self.hidden_size,
             'output_size': self.output_size
@@ -326,6 +328,7 @@ class NeuralNetwork:
         nn.games_played = data['games_played']
         nn.wins = data['wins']
         nn.total_resources_gathered = data['total_resources_gathered']
+        nn.nn_actions_taken = data.get('nn_actions_taken', 0)
         
         return nn
 
